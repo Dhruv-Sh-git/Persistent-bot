@@ -7,7 +7,7 @@ from langgraph.graph.message import add_messages
 from dotenv import load_dotenv
 
 load_dotenv()
-llm=ChatGroq(model="gpt-4o", temperature=0.9)
+llm=ChatGroq(model="openai/gpt-oss-20b")
 class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 def chat_node(state: ChatState):
@@ -15,7 +15,7 @@ def chat_node(state: ChatState):
     response=llm.invoke(messages)
     return {"messages":[response]}
 
-checkpointer=InMemorySaver()
+checkpointer=MemorySaver()
 graph=StateGraph(ChatState)
 graph.add_node("chat_node", chat_node)
 graph.add_edge(START, "chat_node")
