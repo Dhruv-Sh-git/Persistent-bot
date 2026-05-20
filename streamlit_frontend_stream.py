@@ -3,6 +3,9 @@
 import streamlit as st
 from langchain_core.messages import HumanMessage
 import uuid
+import os
+import json
+from datetime import datetime
 
 # Import your backend chatbot
 from langgraph_backend import chatbot
@@ -153,6 +156,43 @@ if "messages" not in st.session_state:
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
 
+# Conversations storage (simple JSON file in workspace)
+CONV_PATH = os.path.join(os.path.dirname(__file__), "conversations.json")
+
+def load_conversations():
+    if os.path.exists(CONV_PATH):
+        try:
+            with open(CONV_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_conversation(thread_id, messages):
+    conv = load_conversations()
+    # derive title from first user message or timestamp
+    title = None
+    for m in messages:
+        if m.get("role") == "user" and m.get("content"):
+            title = m.get("content")[:60]
+            break
+    if not title:
+        title = f"Chat {datetime.utcnow().isoformat()}"
+    conv[thread_id] = {
+        "title": title,
+        "messages": messages,
+        "last_updated": datetime.utcnow().isoformat()
+    }
+    with open(CONV_PATH, "w", encoding="utf-8") as f:
+        json.dump(conv, f, ensure_ascii=False, indent=2)
+
+def delete_conversation(thread_id):
+    conv = load_conversations()
+    if thread_id in conv:
+        del conv[thread_id]
+        with open(CONV_PATH, "w", encoding="utf-8") as f:
+            json.dump(conv, f, ensure_ascii=False, indent=2)
+
 # ==========================================
 # SIDEBAR
 # ==========================================
@@ -182,10 +222,33 @@ with st.sidebar:
 
     st.write("")
 
+    # Resume chat UI
+    conversations = load_conversations()
+    conv_items = [(k, v.get("title", k)) for k, v in conversations.items()]
+    conv_items.sort(key=lambda t: conversations[t[0]].get("last_updated", ""), reverse=True)
+
+    st.markdown("---")
+    st.markdown("### Previous Conversations")
+    if conv_items:
+        labels = [f"{v} — {k[:8]}" for k, v in conv_items]
+        sel = st.selectbox("Select a conversation to resume", options=[k for k, _ in conv_items], format_func=lambda k: conversations[k]["title"])
+        cols = st.columns([2,1])
+        if cols[0].button("Resume Chat"):
+            st.session_state.messages = conversations[sel]["messages"]
+            st.session_state.thread_id = sel
+        if cols[1].button("Delete"):
+            delete_conversation(sel)
+    else:
+        st.markdown("_No previous conversations found._")
+
+    st.write("")
+    if st.button("➕ New Chat"):
+        st.session_state.messages = []
+        st.session_state.thread_id = str(uuid.uuid4())
+
     if st.button("🗑 Clear Conversation"):
         st.session_state.messages = []
         st.session_state.thread_id = str(uuid.uuid4())
-        st.rerun()
 
     st.write("")
 
@@ -314,6 +377,11 @@ if prompt:
         "role": "assistant",
         "content": streamed_text
     })
+    # persist conversation
+    try:
+        save_conversation(st.session_state.thread_id, st.session_state.messages)
+    except Exception:
+        pass
     #for message_chunk,metadata in chatbot.stream(
 #     {"messages": [HumanMessage(content=prompt)]},
 #     config = {
